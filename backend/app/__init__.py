@@ -60,5 +60,8 @@ def create_app(test_config=None):
         upgrade_schema()
         cfg = app.config
         ensure_admin(cfg["ADMIN_EMAIL"], cfg["ADMIN_PASSWORD"], cfg["ADMIN_NAME"])
+        # Tutup koneksi milik proses induk agar tiap worker Gunicorn membuat koneksinya sendiri.
+        if db.engine.dialect.name != "sqlite":
+            db.engine.dispose()
 
     return app
