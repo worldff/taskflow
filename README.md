@@ -1,6 +1,8 @@
 # TaskFlow — Aplikasi Full Stack dengan Container & CI/CD
 
-Aplikasi manajemen tugas tim **full stack**:
+Aplikasi web **full stack** untuk pengumpulan dan verifikasi tugas dengan dua peran:
+**User** mengirim tugas (judul + deskripsi), **Admin** memeriksa lalu menandainya selesai,
+dan status di akun User berubah menjadi **Selesai**.
 
 | Lapisan | Teknologi | Container |
 |---|---|---|
@@ -9,7 +11,7 @@ Aplikasi manajemen tugas tim **full stack**:
 | Database | PostgreSQL 16 + volume persisten | `taskflow-db` |
 
 Dikemas dengan **Docker & Podman** dan dideploy otomatis oleh **GitHub Actions**.
-UTS Pengembangan dan Operasional Perangkat Lunak (DevOps) — IF-B Sore.
+UTS Mata Kuliah **Pengembangan dan Operasi** — **Kelompok Blueprints**, Kelas IF B Sore, Universitas Mikroskil.
 
 | No | Nama | NIM |
 |----|------|-----|
@@ -34,7 +36,7 @@ deploy/SETUP-RUNNER.md panduan komputer server CD (self-hosted runner)
 
 ```bash
 # Docker
-cp .env.example .env
+cp .env.example .env                  # Windows CMD: copy .env.example .env
 docker compose up -d --build          # buka http://localhost:8080
 
 # Podman
