@@ -10,6 +10,8 @@ dan status di akun User berubah menjadi **Selesai**.
 | Backend | Flask 3 REST API, autentikasi JWT, Gunicorn | `taskflow-backend` |
 | Database | PostgreSQL 16 + volume persisten | `taskflow-db` |
 
+![Arsitektur TaskFlow: 3 container](docs/arsitektur.png)
+
 Dikemas dengan **Docker & Podman** dan dideploy otomatis oleh **GitHub Actions**.
 UTS Mata Kuliah **Pengembangan dan Operasi** — **Kelompok Blueprints**, Kelas IF B Sore, Universitas Mikroskil.
 
@@ -71,6 +73,8 @@ Akun admin awal dibuat otomatis dari `ADMIN_EMAIL` / `ADMIN_PASSWORD`
 (bawaan: `admin@taskflow.id` / `admin123` — ganti untuk production).
 
 ## CI/CD
+![Alur pipeline CI/CD](docs/alur-cicd.png)
+
 Push ke `main`: test backend & frontend → build 2 image → push ke GHCR →
 uji end-to-end seluruh stack → **deploy otomatis ke komputer kelompok** (GitHub
 self-hosted runner + Docker Desktop) → cek `/api/health`.
