@@ -2,6 +2,7 @@ from datetime import datetime, timezone
 
 from flask_sqlalchemy import SQLAlchemy
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import IntegrityError
 from werkzeug.security import check_password_hash, generate_password_hash
 
 db = SQLAlchemy()
@@ -123,4 +124,8 @@ def ensure_admin(email, password, name="Administrator"):
         db.session.add(admin)
     elif admin.role != "admin":
         admin.role = "admin"
-    db.session.commit()
+    try:
+        db.session.commit()
+    except IntegrityError:
+        # Proses lain sudah membuat akun admin yang sama pada saat bersamaan.
+        db.session.rollback()
