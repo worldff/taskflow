@@ -1,0 +1,197 @@
+name: CI/CD TaskFlow
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ===================== CONTINUOUS INTEGRATION =====================
+  test-backend:
+    name: CI - Test Backend (Flask)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+      - name: Install dependency
+        run: pip install -r requirements-dev.txt
+      - name: Lint (flake8)
+        run: flake8 .
+      - name: Unit test + coverage
+        run: pytest --cov=app --cov-report=term-missing
+
+  test-frontend:
+    name: CI - Test Frontend (React)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install dependency
+        run: npm ci
+      - name: Unit test (Vitest)
+        run: npm test
+      - name: Build production
+        run: npm run build
+
+  build:
+    name: CI - Build & Push Image (${{ matrix.service }})
+    needs: [test-backend, test-frontend]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Tentukan nama & tag image
+        id: vars
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=${{ env.REGISTRY }}/$OWNER/taskflow-${{ matrix.service }}" >> "$GITHUB_OUTPUT"
+          echo "tag=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login ke GitHub Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (dan push jika bukan PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: ./${{ matrix.service }}
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: APP_VERSION=${{ steps.vars.outputs.tag }}
+          tags: |
+            ${{ steps.vars.outputs.image }}:${{ steps.vars.outputs.tag }}
+            ${{ steps.vars.outputs.image }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+
+  e2e:
+    name: CI - Uji End-to-End Stack
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login ke GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Jalankan stack dari image yang baru dibuat
+        run: |
+          OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          TAG=sha-${GITHUB_SHA::7}
+          export BACKEND_IMAGE=ghcr.io/$OWNER/taskflow-backend:$TAG
+          export FRONTEND_IMAGE=ghcr.io/$OWNER/taskflow-frontend:$TAG
+          docker compose up -d --no-build --wait
+
+      - name: Uji alur user register -> kirim tugas lewat frontend (Nginx -> API -> DB)
+        run: |
+          B=http://localhost:8080
+          curl -fs $B/ | grep -q "<div id=\"root\">"
+          curl -fs $B/api/health
+          TOKEN=$(curl -fs -X POST $B/api/auth/register -H 'Content-Type: application/json' \
+            -d '{"name":"CI Bot","email":"ci@taskflow.id","password":"rahasia123"}' | jq -r .token)
+          TASK=$(curl -fs -X POST $B/api/tasks -H "Authorization: Bearer $TOKEN" \
+            -H 'Content-Type: application/json' \
+            -d '{"title":"Uji E2E","description":"Dikirim oleh pipeline CI"}' | jq -r .id)
+          test "$(curl -fs "$B/api/tasks/$TASK" -H "Authorization: Bearer $TOKEN" | jq -r .status)" = "menunggu"
+
+      - name: Uji alur admin -> verifikasi tugas user -> status user selesai
+        run: |
+          B=http://localhost:8080
+          USER_TOKEN=$(curl -fs -X POST $B/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"ci@taskflow.id","password":"rahasia123"}' | jq -r .token)
+          ADMIN_TOKEN=$(curl -fs -X POST $B/api/auth/login -H 'Content-Type: application/json' \
+            -d '{"email":"admin@taskflow.id","password":"admin123"}' | jq -r .token)
+          TASK=$(curl -fs "$B/api/admin/tasks?status=menunggu" -H "Authorization: Bearer $ADMIN_TOKEN" | jq -r '.[0].id')
+          curl -fs -X PATCH "$B/api/admin/tasks/$TASK" -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H 'Content-Type: application/json' -d '{"done":true}'
+          test "$(curl -fs "$B/api/tasks/$TASK" -H "Authorization: Bearer $USER_TOKEN" | jq -r .status)" = "selesai"
+
+      - name: Log container jika gagal
+        if: failure()
+        run: docker compose logs
+
+  # ===================== CONTINUOUS DEPLOYMENT =====================
+  # Target deploy: komputer kelompok (Windows + Docker Desktop) yang dipasangi
+  # GitHub self-hosted runner. Setiap push ke main, komputer tersebut otomatis
+  # menarik image terbaru dari GHCR lalu memperbarui container TaskFlow.
+  deploy:
+    name: CD - Deploy ke Server (Self-hosted Runner)
+    needs: e2e
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Windows]
+    permissions:
+      contents: read
+      packages: read
+    environment:
+      name: production
+      url: http://localhost:8080
+    defaults:
+      run:
+        shell: powershell
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login ke GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Siapkan file .env (jika belum ada)
+        run: if (-not (Test-Path .env)) { Copy-Item .env.example .env }
+
+      - name: Pull image versi commit ini & perbarui container
+        run: |
+          $ErrorActionPreference = "Stop"
+          $owner = "${{ github.repository_owner }}".ToLower()
+          $tag = "sha-" + "${{ github.sha }}".Substring(0, 7)
+          $env:BACKEND_IMAGE  = "ghcr.io/$owner/taskflow-backend:$tag"
+          $env:FRONTEND_IMAGE = "ghcr.io/$owner/taskflow-frontend:$tag"
+          $env:APP_VERSION    = $tag
+          docker compose -p taskflow pull backend frontend
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          docker compose -p taskflow up -d --no-build --wait
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          docker image prune -f
+
+      - name: Verifikasi aplikasi berjalan
+        run: |
+          $health = Invoke-RestMethod http://localhost:8080/api/health
+          $health | Format-List
+          if ($health.status -ne "ok") { exit 1 }

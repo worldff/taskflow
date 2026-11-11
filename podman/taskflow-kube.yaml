@@ -1,0 +1,48 @@
+# Manifest bergaya Kubernetes yang dijalankan oleh Podman:
+#   podman build -t localhost/taskflow-backend:latest ./backend
+#   podman build -t localhost/taskflow-frontend:latest ./frontend
+#   podman kube play podman/taskflow-kube.yaml
+#   podman kube down podman/taskflow-kube.yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: taskflow
+  labels:
+    app: taskflow
+spec:
+  containers:
+    - name: db
+      image: docker.io/library/postgres:16-alpine
+      env:
+        - name: POSTGRES_DB
+          value: taskflow
+        - name: POSTGRES_USER
+          value: taskflow
+        - name: POSTGRES_PASSWORD
+          value: taskflow
+      volumeMounts:
+        - name: pgdata
+          mountPath: /var/lib/postgresql/data
+    - name: backend
+      image: localhost/taskflow-backend:latest
+      env:
+        - name: DATABASE_URL
+          value: postgresql+psycopg://taskflow:taskflow@127.0.0.1:5432/taskflow
+        - name: SECRET_KEY
+          value: ganti-dengan-secret-acak
+        - name: ADMIN_EMAIL
+          value: admin@taskflow.id
+        - name: ADMIN_PASSWORD
+          value: admin123
+    - name: frontend
+      image: localhost/taskflow-frontend:latest
+      env:
+        - name: BACKEND_URL
+          value: http://127.0.0.1:5000
+      ports:
+        - containerPort: 80
+          hostPort: 8080
+  volumes:
+    - name: pgdata
+      persistentVolumeClaim:
+        claimName: taskflow-pgdata
