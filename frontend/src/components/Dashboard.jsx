@@ -52,7 +52,7 @@ export default function Dashboard({ user, onLogout }) {
 
   return (
     <div className="app">
-      <TopBar user={user} onLogout={onLogout} subtitle="Pengumpulan tugas UTS DevOps" />
+      <TopBar user={user} onLogout={onLogout} subtitle="Pengumpulan tugas" />
 
       <main className="container">
         <h2 className="greet">Halo, {user.name.split(" ")[0]} 👋</h2>
